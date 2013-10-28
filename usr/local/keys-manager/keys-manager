@@ -92,7 +92,7 @@ class KeysManager {
 					// this is the group
 					$groupName = substr($key, 1);
 					if (isset($this->groups[$groupName])) {
-						$shareKeys += $this->groups[$groupName];
+						$shareKeys = array_merge($shareKeys, $this->groups[$groupName]);
 					}
 				} else {
 					// this is the key
