@@ -1,0 +1,157 @@
+#!/usr/bin/env php
+<?php
+
+$keysManager = new KeysManager();
+
+class KeysManager {
+
+	protected $keysManagerConf;
+	protected $groupsConf;
+	protected $sharesConf;
+
+	protected $keys;
+	protected $groups;
+	protected $shares;
+
+	const LF = "\n";
+
+	/**
+	 *
+	 */
+	public function __construct() {
+		$this->readConfigs('./conf/keys-manager.conf');
+		$this->readKeys();
+		$this->readGroups();
+		$this->readShares();
+
+		$this->processShares();
+
+		echo 'Done.' . self::LF;
+	}
+
+	/**
+	 * @param $mainConfigPath
+	 */
+	protected function readConfigs($mainConfigPath) {
+		echo 'Reading configuration files.' . self::LF;
+		$this->keysManagerConf = parse_ini_file($mainConfigPath, TRUE);
+
+		$this->groupsConf = parse_ini_file($this->keysManagerConf['groupsconf'], TRUE);
+		$this->sharesConf = parse_ini_file($this->keysManagerConf['sharesconf'], TRUE);
+	}
+
+	/**
+	 *
+	 */
+	protected function readKeys() {
+		echo 'Reading keys files.' . self::LF;
+		$this->keys = array();
+
+		$key_files = scandir($this->keysManagerConf['keydir']);
+		foreach ($key_files as $key_file) {
+			if (preg_match('/^(.+)\.pub$/', $key_file, $matches)) {
+				$this->keys[$matches[1]] = trim(file_get_contents($this->keysManagerConf['keydir'] . $key_file));
+			}
+		}
+	}
+
+	/**
+	 *
+	 */
+	protected function readGroups() {
+		echo 'Parsing groups' . self::LF;
+		$this->groups = array();
+
+		foreach ($this->groupsConf as $groupName => $groupConf) {
+			$existingKeys = array();
+			$keys = self::trimExplode(' ', $groupConf['keys'], TRUE);
+			$keys = array_unique($keys);
+			foreach ($keys as $key) {
+				if (isset($this->keys[$key])) {
+					$existingKeys[] = $key;
+				}
+			}
+			if (count($existingKeys) > 0) {
+				$this->groups[$groupName] = $existingKeys;
+			}
+		}
+	}
+
+	/**
+	 *
+	 */
+	protected function readShares() {
+		echo 'Parsing shares' . self::LF;
+		$this->shares = array();
+
+		foreach ($this->sharesConf as $shareConf) {
+			$shareKeys = array();
+			$keys = self::trimExplode(' ', $shareConf['keys'], TRUE);
+			foreach ($keys as $key) {
+				if (substr($key, 0, 1) == '@') {
+					// this is the group
+					$groupName = substr($key, 1);
+					if (isset($this->groups[$groupName])) {
+						$shareKeys += $this->groups[$groupName];
+					}
+				} else {
+					// this is the key
+					if (isset($this->keys[$key])) {
+						$shareKeys[] = $key;
+					}
+				}
+			}
+			$shareKeys = array_unique($shareKeys);
+			$this->shares[$shareConf['path']] = $shareKeys;
+		}
+	}
+
+	/**
+	 *
+	 */
+	protected function processShares() {
+		foreach ($this->shares as $path => $keys) {
+			$authorizedKeys = '';
+			foreach ($keys as $key) {
+				$authorizedKeys .= $this->keys[$key] . self::LF;
+			}
+			echo 'Writing config file ' . $path . self::LF;
+			file_put_contents($path, $authorizedKeys);
+		}
+	}
+
+	/**
+	 * Explodes a string and trims all values for whitespace in the ends.
+	 * If $onlyNonEmptyValues is set, then all blank ('') values are removed.
+	 *
+	 * @param string $delim Delimiter string to explode with
+	 * @param string $string The string to explode
+	 * @param boolean $removeEmptyValues If set, all empty values will be removed in output
+	 * @param integer $limit If positive, the result will contain a maximum of
+	 * @return array Exploded values
+	 */
+	protected static function trimExplode($delim, $string, $removeEmptyValues = FALSE, $limit = 0) {
+		$explodedValues = explode($delim, $string);
+		$result = array_map('trim', $explodedValues);
+		if ($removeEmptyValues) {
+			$temp = array();
+			foreach ($result as $value) {
+				if ($value !== '') {
+					$temp[] = $value;
+				}
+			}
+			$result = $temp;
+		}
+		if ($limit != 0) {
+			if ($limit < 0) {
+				$result = array_slice($result, 0, $limit);
+			} elseif (count($result) > $limit) {
+				$lastElements = array_slice($result, $limit - 1);
+				$result = array_slice($result, 0, $limit - 1);
+				$result[] = implode($delim, $lastElements);
+			}
+		}
+		return $result;
+	}
+
+}
